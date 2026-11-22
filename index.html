@@ -1015,6 +1015,11 @@ svg.leaflet-image-layer.leaflet-interactive path {
         .managed-card { border:1px solid #ddd; border-radius:12px; padding:9px; display:flex; gap:10px; align-items:center; }
         .managed-card img { width:64px; height:64px; object-fit:cover; border-radius:8px; background:#eee; }
         .managed-card .managed-body { min-width:0; flex:1; }
+        .managed-group-title { padding:10px 8px 5px; color:#255d50; font-weight:750; border-bottom:1px solid #dce8e2; }
+        .managed-cover-badge { color:#16624d; font-size:12px; font-weight:700; margin-left:4px; }
+        .managed-actions { flex-wrap:wrap; }
+        #admin-panel .managed-actions button:disabled { opacity:.35; cursor:not-allowed; }
+        #admin-panel .managed-actions .cover-action { background:#e9f4ee; color:#18533f; border-color:#b8dbca; }
         .managed-card .managed-title { font-weight:650; overflow-wrap:anywhere; }
         .managed-card .managed-actions { display:flex; gap:5px; margin-top:5px; }
         #admin-panel .managed-actions button { padding:6px 9px; border:1px solid #ddd; background:#f4f4f4; }
@@ -1209,6 +1214,15 @@ svg.leaflet-image-layer.leaflet-interactive path {
           #detail-overlay .detail-photo { min-height: 0; }
           #detail-overlay .detail-photo img { max-height: 38dvh; }
         }
+        /* Multiple photographs within a single place */
+        .detail-photo { position: relative; }
+        .photo-slide-control { position:absolute; z-index:3; top:50%; transform:translateY(-50%); width:38px; height:44px; border-radius:22px; border:1px solid #ffffff80; background:#122d2bbd; color:white; font-size:31px; line-height:1; cursor:pointer; }
+        .photo-slide-control.prev { left:9px; }
+        .photo-slide-control.next { right:9px; }
+        .photo-slide-count { position:absolute; z-index:3; bottom:12px; left:50%; transform:translateX(-50%); padding:4px 12px; border-radius:20px; background:#112927b9; color:white; font-size:12px; font-weight:650; }
+        .photo-slide-control[hidden], .photo-slide-count[hidden] { display:none!important; }
+        .gallery-photo-count { display:inline-block; margin-top:5px; font-size:11px; color:#54776e; }
+        .detail-photo img { touch-action: pan-y; }
     </style>
 </head>
 <body>
@@ -1236,8 +1250,11 @@ svg.leaflet-image-layer.leaflet-interactive path {
         <div class="detail-sheet" id="detail-sheet">
             <div class="detail-drag-zone" id="detail-drag-zone" aria-hidden="true"><span class="detail-grab"></span></div>
             <button class="detail-close" id="detail-close" type="button" aria-label="詳細画面を閉じる">&times;</button>
-            <div class="detail-photo">
+            <div class="detail-photo" id="detail-photo-area">
                 <img id="detail-photo-img" src="" alt="">
+                <button id="photo-prev" class="photo-slide-control prev" type="button" aria-label="前の写真">‹</button>
+                <button id="photo-next" class="photo-slide-control next" type="button" aria-label="次の写真">›</button>
+                <div id="photo-slide-count" class="photo-slide-count" aria-live="polite"></div>
             </div>
             <div class="detail-info" id="detail-info"></div>
         </div>
@@ -1260,10 +1277,15 @@ svg.leaflet-image-layer.leaflet-interactive path {
             <div class="admin-row"><button id="admin-login" type="button" class="primary">ログイン</button></div>
         </div>
         <div id="upload-view" hidden>
-            <p id="admin-hint">写真を選んで、地図をクリックして場所を指定。日付とひとことを添えて公開できます。</p>
+            <p id="admin-hint">新しい場所を作るか、登録済みスポットに写真を追加できます。写真は自動圧縮します。</p>
             <label for="file-input">写真（JPEG / PNG / WebP、自動圧縮対応）</label>
             <input type="file" id="file-input" accept="image/jpeg,image/png,image/webp" />
             <img id="admin-preview" alt="アップロード画像のプレビュー" />
+            <label for="spot-choice">写真を追加する場所</label>
+            <select id="spot-choice" style="width:100%;padding:12px;border:1px solid #d5ddd9;border-radius:9px;margin:5px 0 12px;background:white">
+              <option value="new">＋ 新しいスポットを作成</option>
+            </select>
+            <p id="spot-choice-hint" style="color:#6b7872;font-size:12px;margin:0 0 10px">既存の場所を選ぶと、位置の再指定は不要です。</p>
             <label for="spot-title">スポット名</label><input id="spot-title" placeholder="例：芝公園から見る東京タワー" maxlength="120" />
             <label for="spot-date">日付（任意）</label><input id="spot-date" type="date" />
             <label for="spot-caption">ひとこと（任意）</label><input id="spot-caption" placeholder="例：秋の紅葉と東京タワーがきれい" maxlength="250" />
@@ -1272,6 +1294,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
             <div class="admin-row"><button id="pick-location" type="button">地図上で位置を選ぶ</button><button id="save-photo" class="primary" type="button">写真を公開する</button></div>
             <div style="margin-top:18px;border-top:1px solid #ddd;padding-top:12px">
                 <div class="admin-row" style="justify-content:space-between"><strong>登録済み写真</strong><button id="refresh-managed" type="button">一覧を更新</button></div>
+                <p style="font-size:12px;color:#5d7069;margin:5px 0 0">各スポットの先頭が表紙です。「表紙にする」「↑」「↓」で変更できます。</p>
                 <div id="managed-photos" aria-live="polite">読み込み中…</div>
                 <div id="edit-view" hidden>
                     <h3>写真の情報を編集</h3>
@@ -1405,39 +1428,70 @@ svg.leaflet-image-layer.leaflet-interactive path {
         }
 
         let detailReturnFocus = null;
-        function openDetail(d) {
-            detailReturnFocus = document.activeElement;
+        let detailSpot = null;
+        let detailSlideIndex = 0;
+        const photoPrev = document.getElementById('photo-prev');
+        const photoNext = document.getElementById('photo-next');
+        const photoSlideCount = document.getElementById('photo-slide-count');
+        const detailPhotoArea = document.getElementById('detail-photo-area');
+        function showDetailSlide() {
+            if (!detailSpot) return;
+            const items = detailSpot.photos || [detailSpot];
+            const d = items[detailSlideIndex];
             detailPhotoImg.src = d.url;
-            detailPhotoImg.alt = d.title || '撮影スポットの写真';
-            const dateLabel = d.info?.date && d.info.date !== '不明' ? `<div class="spot-date">${escapeHtml(d.info.date)}</div>` : '';
+            detailPhotoImg.alt = `${detailSpot.title || 'スポット'} の写真 ${detailSlideIndex+1}`;
+            const dateLabel = d.info?.date ? `<div class="spot-date">${escapeHtml(d.info.date)}</div>` : '';
             const caption = d.info?.caption ? `<div class="spot-caption">${escapeHtml(d.info.caption)}</div>` : '';
-            detailInfo.innerHTML = `<div class="spot-eyebrow">TOKYO PHOTO MAP · SPOT</div><div class="spot-title">${escapeHtml(d.title || '撮影スポット')}</div>` + dateLabel + caption;
-            if (Number.isFinite(Number(d.lat)) && Number.isFinite(Number(d.lon))) {
-                const lat = Number(d.lat), lon = Number(d.lon);
+            detailInfo.innerHTML = `<div class="spot-eyebrow">TOKYO PHOTO MAP · SPOT</div><div class="spot-title">${escapeHtml(detailSpot.title || '撮影スポット')}</div>` + dateLabel + caption;
+            const multi = items.length > 1;
+            photoPrev.hidden = photoNext.hidden = photoSlideCount.hidden = !multi;
+            photoSlideCount.textContent = `${detailSlideIndex+1} / ${items.length}`;
+            const lat = Number(detailSpot.lat), lon = Number(detailSpot.lon);
+            if (Number.isFinite(lat) && Number.isFinite(lon)) {
                 const actions = document.createElement('div');
                 actions.className = 'detail-actions';
-                const goToLocation = document.createElement('button');
-                goToLocation.type = 'button';
-                goToLocation.className = 'detail-location primary';
-                goToLocation.textContent = '📍 地図で見る';
-                goToLocation.onclick = () => {
-                    closeDetail(false);
-                    switchView('map');
+                const go = document.createElement('button');
+                go.type = 'button'; go.className = 'detail-location primary';
+                go.textContent = '📍 地図で見る';
+                go.onclick = () => {
+                    closeDetail(false); switchView('map');
                     map.flyTo([lat,lon], Math.max(map.getZoom(),17), { duration:.65 });
                 };
-                const googleLink = document.createElement('a');
-                googleLink.className = 'detail-location';
-                googleLink.textContent = '↗ Googleマップで開く';
-                googleLink.href = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${lat},${lon}`)}`;
-                googleLink.target = '_blank';
-                googleLink.rel = 'noopener noreferrer';
-                googleLink.setAttribute('aria-label','Googleマップでこの撮影位置を開く（新しいタブ）');
-                actions.append(goToLocation,googleLink);
-                detailInfo.append(actions);
+                const google = document.createElement('a');
+                google.className = 'detail-location'; google.textContent = '↗ Googleマップで開く';
+                google.href = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${lat},${lon}`)}`;
+                google.target = '_blank'; google.rel = 'noopener noreferrer';
+                actions.append(go,google); detailInfo.append(actions);
             }
+        }
+        function changeDetailSlide(delta) {
+            if (!detailSpot) return;
+            const length = (detailSpot.photos || [detailSpot]).length;
+            detailSlideIndex = (detailSlideIndex + delta + length) % length;
+            showDetailSlide();
+        }
+        photoPrev.onclick = () => changeDetailSlide(-1);
+        photoNext.onclick = () => changeDetailSlide(1);
+        let slideTouchX = null, slideTouchY = null;
+        detailPhotoArea.addEventListener('touchstart', e => {
+            if (e.touches.length !== 1) return;
+            slideTouchX = e.touches[0].clientX; slideTouchY = e.touches[0].clientY;
+        },{passive:true});
+        detailPhotoArea.addEventListener('touchend', e => {
+            if (slideTouchX === null || !e.changedTouches.length) return;
+            const dx = e.changedTouches[0].clientX-slideTouchX;
+            const dy = e.changedTouches[0].clientY-slideTouchY;
+            if (Math.abs(dx)>45 && Math.abs(dx)>Math.abs(dy)*1.3) changeDetailSlide(dx<0?1:-1);
+            slideTouchX = slideTouchY = null;
+        },{passive:true});
+        function openDetail(spot) {
+            detailReturnFocus = document.activeElement;
+            detailSpot = spot;
+            detailSlideIndex = 0;
+            showDetailSlide();
             detailOverlay.classList.add('open');
-            detailOverlay.setAttribute('aria-hidden', 'false');
-            document.body.style.overflow = 'hidden';
+            detailOverlay.setAttribute('aria-hidden','false');
+            document.body.style.overflow='hidden';
             detailClose.focus();
         }
 
@@ -1447,6 +1501,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
             document.body.style.overflow = '';
             if (restoreFocus && detailReturnFocus && detailReturnFocus.isConnected && typeof detailReturnFocus.focus === 'function') detailReturnFocus.focus();
             detailReturnFocus = null;
+            detailSpot = null;
         }
 
         detailClose.addEventListener('click', () => closeDetail());
@@ -1527,7 +1582,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
         // 旧HTMLに直接登録されていた固定写真は表示しない。
         // Supabaseに保存した写真のみを地図とギャラリーで表示する。
 
-        // Gallery uses the same objects as map markers; no second database or API required.
+        // A map pin / gallery card represents a PLACE, not an individual picture.
         let cloudGalleryPhotos = [];
         const galleryGrid = document.getElementById('gallery-grid');
         const gallerySearch = document.getElementById('gallery-search');
@@ -1545,50 +1600,67 @@ svg.leaflet-image-layer.leaflet-interactive path {
         gallerySearch.oninput = () => renderGallery();
         function renderGallery() {
             const query = gallerySearch.value.trim().toLocaleLowerCase('ja');
-            const photos = cloudGalleryPhotos.filter(p =>
-                !query || [p.title || '撮影スポット', p.info?.caption || '', p.info?.date || '']
+            const spots = cloudGalleryPhotos.filter(p =>
+                !query || [p.title || '', ...p.photos.flatMap(x=>[x.info?.caption||'',x.info?.date||''])]
                     .some(value => String(value).toLocaleLowerCase('ja').includes(query))
             );
             galleryGrid.replaceChildren();
             const fragment = document.createDocumentFragment();
-            photos.forEach(p => {
-                const card = document.createElement('button'); card.type = 'button'; card.className = 'gallery-card';
-                card.setAttribute('aria-label', `${p.title || '撮影スポット'} の写真を見る`);
-                const image = document.createElement('img'); image.className = 'gallery-thumb';
-                image.src = p.url; image.alt = p.title || '東京の風景'; image.loading = 'lazy'; image.decoding = 'async';
-                image.onerror = () => { image.onerror = null; image.removeAttribute('src'); image.alt = '画像を読み込めませんでした'; };
-                const body = document.createElement('span'); body.className = 'gallery-card-body';
-                const title = document.createElement('span'); title.className = 'gallery-card-title';
-                title.textContent = p.title || decodeURIComponent((p.url.split('/').pop() || '撮影スポット').replace(/\.[^.]+$/, '').replace(/[_-]/g, ' '));
-                const date = document.createElement('span'); date.className = 'gallery-card-date';
-                date.textContent = p.info?.date || '東京の風景';
-                body.append(title, date); card.append(image, body);
-                card.onclick = () => openDetail(p);
-                fragment.append(card);
+            spots.forEach(p => {
+                const card = document.createElement('button'); card.type='button'; card.className='gallery-card';
+                card.setAttribute('aria-label', `${p.title}・写真${p.photos.length}枚を見る`);
+                const img = document.createElement('img'); img.className='gallery-thumb';
+                img.src=p.url; img.alt=p.title; img.loading='lazy'; img.decoding='async';
+                img.onerror = () => { img.onerror=null; img.removeAttribute('src'); img.alt='画像を読み込めませんでした'; };
+                const body=document.createElement('span'); body.className='gallery-card-body';
+                const title=document.createElement('span'); title.className='gallery-card-title'; title.textContent=p.title;
+                const subtitle=document.createElement('span'); subtitle.className='gallery-card-date';
+                subtitle.textContent=p.photos[0].info?.date||'東京の風景';
+                body.append(title,subtitle);
+                if(p.photos.length>1){
+                    const count=document.createElement('span'); count.className='gallery-photo-count';
+                    count.textContent=`▣ ${p.photos.length}枚の写真`; body.append(count);
+                }
+                card.append(img,body); card.onclick=()=>openDetail(p); fragment.append(card);
             });
             galleryGrid.append(fragment);
-            document.getElementById('gallery-count').textContent = `${photos.length} スポット`;
-            document.getElementById('gallery-empty').style.display = photos.length ? 'none' : 'block';
+            document.getElementById('gallery-count').textContent=`${spots.length} スポット`;
+            document.getElementById('gallery-empty').style.display=spots.length?'none':'block';
         }
         renderGallery();
 
-        // Supabase photos are the single source for the public map and gallery.
+        function comparePhotoOrder(a,b) {
+            return (Number(a.sort_order ?? 1000000) - Number(b.sort_order ?? 1000000)) ||
+                String(b.created_at || '').localeCompare(String(a.created_at || '')) ||
+                String(a.id).localeCompare(String(b.id));
+        }
         async function loadCloudPhotos() {
             if (!db) return;
-            const version = ++cloudLoadVersion;
-            const { data, error } = await db.from('photos')
-                .select('id,title,lat,lon,image_path,info').eq('published', true)
-                .order('created_at', { ascending: false }).limit(1000);
-            if (error) { console.error('写真読み込み失敗:', error.message); return; }
-            if (version !== cloudLoadVersion) return;
-            for (const marker of cloudMarkerLayers) markers.removeLayer(marker);
+            const version=++cloudLoadVersion;
+            const {data,error}=await db.from('photos')
+                .select('id,spot_id,title,lat,lon,image_path,info,sort_order,created_at')
+                .eq('published',true).order('created_at',{ascending:false}).limit(1000);
+            if(error){console.error('写真読み込み失敗:',error.message);return;}
+            if(version!==cloudLoadVersion)return;
+            // Old rows are already backfilled to their own spot_id by the migration.
+            const groups=new Map();
+            (data||[]).forEach(row=>{
+                const key=row.spot_id||row.id;
+                const photo={id:row.id,url:db.storage.from('photos').getPublicUrl(row.image_path).data.publicUrl,info:row.info||{},sort_order:row.sort_order,created_at:row.created_at};
+                if(!groups.has(key))groups.set(key,{
+                    id:key,title:row.title,lat:row.lat,lon:row.lon,photos:[],url:photo.url,cloudVersion:version
+                });
+                groups.get(key).photos.push(photo);
+            });
+            for(const marker of cloudMarkerLayers)markers.removeLayer(marker);
             cloudMarkerLayers.clear();
-            cloudGalleryPhotos = (data || []).map(row => ({
-                id: row.id, lat: row.lat, lon: row.lon,
-                url: db.storage.from('photos').getPublicUrl(row.image_path).data.publicUrl,
-                info: row.info || {}, title: row.title, cloudVersion: version
-            }));
-            for (const photo of cloudGalleryPhotos) createMarker(photo);
+            cloudGalleryPhotos=[...groups.values()];
+            // The first photo is used for map pins, gallery cards and the first detail slide.
+            for(const spot of cloudGalleryPhotos) {
+                spot.photos.sort(comparePhotoOrder);
+                spot.url = spot.photos[0].url;
+                createMarker(spot);
+            }
             renderGallery();
         }
         loadCloudPhotos();
@@ -1609,11 +1681,41 @@ svg.leaflet-image-layer.leaflet-interactive path {
         let managedRows = [];
         let editingRow = null;
         let deletingRow = null;
+        let availableSpots=[];
+        const spotChoice=document.getElementById('spot-choice');
+        const titleInput=document.getElementById('spot-title');
+        const locationButton=document.getElementById('pick-location');
+        async function refreshSpotChoices(preferId) {
+            const {data,error}=await db.from('spots').select('id,title,lat,lon').order('title');
+            if(error){setStatus('スポット一覧の取得に失敗: '+error.message,true);return;}
+            availableSpots=data||[];
+            spotChoice.replaceChildren(new Option('＋ 新しいスポットを作成','new'));
+            for(const spot of availableSpots)spotChoice.add(new Option(spot.title,spot.id));
+            spotChoice.value=preferId&&availableSpots.some(s=>s.id===preferId)?preferId:'new';
+            applySpotChoice();
+        }
+        function applySpotChoice() {
+            const existing=availableSpots.find(s=>s.id===spotChoice.value);
+            titleInput.readOnly=!!existing;
+            locationButton.disabled=!!existing;
+            if(existing){
+                titleInput.value=existing.title;
+                document.getElementById('spot-lat').value=existing.lat;
+                document.getElementById('spot-lon').value=existing.lon;
+                document.getElementById('spot-choice-hint').textContent='既存スポットに写真を追加します。撮影位置は登録済みのものを使用します。';
+            } else {
+                titleInput.value='';
+                document.getElementById('spot-lat').value='';
+                document.getElementById('spot-lon').value='';
+                document.getElementById('spot-choice-hint').textContent='新しいスポットは地図をタップして位置を指定してください。';
+            }
+        }
+        spotChoice.onchange=applySpotChoice;
 
         function setLoggedIn(loggedIn) {
             document.getElementById('login-view').hidden = loggedIn;
             document.getElementById('upload-view').hidden = !loggedIn;
-            if (loggedIn) refreshManagedPhotos();
+            if (loggedIn) { refreshManagedPhotos(); refreshSpotChoices(); }
             else {
                 document.getElementById('managed-photos').replaceChildren();
                 document.getElementById('edit-view').hidden = true;
@@ -1627,27 +1729,80 @@ svg.leaflet-image-layer.leaflet-interactive path {
             if (!db || !adminMode) return;
             list.textContent = '読み込み中…';
             const { data, error } = await db.from('photos')
-                .select('id,title,lat,lon,info,image_path,created_at')
+                .select('id,spot_id,title,lat,lon,info,image_path,created_at,sort_order')
                 .order('created_at', { ascending: false }).limit(1000);
             if (error) { list.textContent = '一覧の取得に失敗: ' + error.message; return; }
             managedRows = data || [];
             list.replaceChildren();
             if (!managedRows.length) { list.textContent = '登録した写真はまだありません。'; return; }
+            const grouped = new Map();
             for (const row of managedRows) {
-                const card = document.createElement('div'); card.className = 'managed-card';
-                const thumb = document.createElement('img');
-                thumb.loading = 'lazy'; thumb.alt = '';
-                thumb.src = db.storage.from('photos').getPublicUrl(row.image_path).data.publicUrl;
-                const body = document.createElement('div'); body.className = 'managed-body';
-                const title = document.createElement('div'); title.className = 'managed-title'; title.textContent = row.title;
-                const actions = document.createElement('div'); actions.className = 'managed-actions';
-                const edit = document.createElement('button'); edit.type = 'button'; edit.textContent = '編集';
-                edit.onclick = () => startEditing(row);
-                const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '削除'; remove.className = 'danger';
-                remove.onclick = () => askDelete(row);
-                actions.append(edit, remove); body.append(title, actions); card.append(thumb, body); list.append(card);
+                const key = row.spot_id || row.id;
+                if (!grouped.has(key)) grouped.set(key, []);
+                grouped.get(key).push(row);
+            }
+            for (const rows of grouped.values()) {
+                rows.sort(comparePhotoOrder);
+                const heading = document.createElement('div');
+                heading.className = 'managed-group-title';
+                heading.textContent = `${rows[0].title}（${rows.length}枚）`;
+                list.append(heading);
+                rows.forEach((row,index) => {
+                    const card = document.createElement('div'); card.className = 'managed-card';
+                    const thumb = document.createElement('img');
+                    thumb.loading = 'lazy'; thumb.alt = '';
+                    thumb.src = db.storage.from('photos').getPublicUrl(row.image_path).data.publicUrl;
+                    const body = document.createElement('div'); body.className = 'managed-body';
+                    const title = document.createElement('div'); title.className = 'managed-title';
+                    title.textContent = `写真 ${index+1}`;
+                    if (index===0) {
+                        const badge = document.createElement('span');
+                        badge.className = 'managed-cover-badge'; badge.textContent = '★ 表紙';
+                        title.append(badge);
+                    }
+                    const actions = document.createElement('div'); actions.className = 'managed-actions';
+                    const cover = document.createElement('button'); cover.type='button';
+                    cover.className = 'cover-action'; cover.textContent='表紙にする';
+                    cover.disabled = index===0;
+                    cover.onclick = () => reorderManagedPhoto(row,'cover');
+                    const up = document.createElement('button'); up.type='button'; up.textContent='↑';
+                    up.title = '前に移動'; up.disabled = index===0;
+                    up.onclick = () => reorderManagedPhoto(row,'up');
+                    const down = document.createElement('button'); down.type='button'; down.textContent='↓';
+                    down.title = '後ろに移動'; down.disabled = index===rows.length-1;
+                    down.onclick = () => reorderManagedPhoto(row,'down');
+                    const edit = document.createElement('button'); edit.type='button'; edit.textContent='編集';
+                    edit.onclick = () => startEditing(row);
+                    const remove = document.createElement('button'); remove.type='button';
+                    remove.textContent='削除'; remove.className='danger';
+                    remove.onclick = () => askDelete(row);
+                    actions.append(cover,up,down,edit,remove);
+                    body.append(title,actions); card.append(thumb,body); list.append(card);
+                });
             }
         }
+        let reorderBusy = false;
+        async function reorderManagedPhoto(row, action) {
+            if (reorderBusy || !db) return;
+            reorderBusy = true;
+            const list = document.getElementById('managed-photos');
+            list.querySelectorAll('button').forEach(b => b.disabled = true);
+            setStatus('写真の順序を保存しています…');
+            try {
+                const { error } = await db.rpc('reorder_spot_photo', {
+                    p_spot_id: row.spot_id || row.id,
+                    p_photo_id: row.id,
+                    p_action: action
+                });
+                if (error) throw error;
+                await Promise.all([loadCloudPhotos(), refreshManagedPhotos()]);
+                setStatus(action === 'cover' ? '表紙写真を変更しました。' : '写真の順番を変更しました。');
+            } catch (err) {
+                setStatus('並び替え失敗: ' + (err.message || String(err)), true);
+                await refreshManagedPhotos();
+            } finally { reorderBusy = false; }
+        }
+
         function startEditing(row) {
             editingRow = row;
             editingLocation = false;
@@ -1745,7 +1900,9 @@ svg.leaflet-image-layer.leaflet-interactive path {
                     const originalMB = (originalFile.size / 1048576).toFixed(1);
                     const compressedMB = (selectedFile.size / 1048576).toFixed(1);
                     const msg = `自動圧縮しました：${originalMB}MB → ${compressedMB}MB。`;
-                    if (Number.isFinite(exifData.latitude) && Number.isFinite(exifData.longitude)) {
+                    if (spotChoice.value !== 'new') {
+                        setStatus(msg + ' 登録済みスポットに追加します。');
+                    } else if (Number.isFinite(exifData.latitude) && Number.isFinite(exifData.longitude)) {
                         setPickedLocation(exifData.latitude, exifData.longitude);
                         setStatus(msg + ' GPS位置を確認してください。');
                     } else setStatus(msg + '「地図上で位置を選ぶ」を押してください。');
@@ -1758,6 +1915,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
                 }
             };
             document.getElementById('pick-location').onclick = () => {
+                if (spotChoice.value !== 'new') return;
                 pickingLocation = true;
                 switchView('map');
                 adminPanel.classList.remove('open');
@@ -1806,9 +1964,15 @@ svg.leaflet-image-layer.leaflet-interactive path {
                 const button = document.getElementById('edit-save'); button.disabled = true;
                 try {
                     const info = { ...editingRow.info, date: date ? date.replaceAll('-', '/') : '', caption };
-                    const { data, error } = await db.from('photos')
-                        .update({ title, lat, lon, info }).eq('id', editingRow.id).select('id').single();
-                    if (error || !data) throw error || new Error('更新対象が見つかりません。');
+                    const spotId=editingRow.spot_id||editingRow.id;
+                    // Shared spot name and coordinates must change for every photo in the group.
+                    const { error: spotError }=await db.from('spots').update({title,lat,lon}).eq('id',spotId);
+                    if(spotError)throw spotError;
+                    const {error: groupError}=await db.from('photos').update({title,lat,lon}).eq('spot_id',spotId);
+                    if(groupError)throw groupError;
+                    const {data,error}=await db.from('photos').update({info}).eq('id',editingRow.id).select('id').single();
+                    if(error||!data)throw error||new Error('更新対象が見つかりません。');
+                    await refreshSpotChoices(spotId);
                     document.getElementById('edit-cancel').click();
                     closeDetail();
                     await loadCloudPhotos();
@@ -1832,6 +1996,14 @@ svg.leaflet-image-layer.leaflet-interactive path {
                     closeDetail();
                     await loadCloudPhotos();
                     await refreshManagedPhotos();
+                    const spotId=row.spot_id||row.id;
+                    const {count:remaining,error:countError}=await db.from('photos')
+                        .select('id',{count:'exact',head:true}).eq('spot_id',spotId);
+                    if(!countError&&remaining===0){
+                        const {error:spotRemoveError}=await db.from('spots').delete().eq('id',spotId);
+                        if(spotRemoveError)console.warn('空スポットの削除失敗:',spotRemoveError.message);
+                    }
+                    await refreshSpotChoices();
                     const { error: storageError } = await db.storage.from('photos').remove([row.image_path]);
                     if (storageError) setStatus('MAPから削除しました。ただし画像ファイルの削除に失敗しました: ' + storageError.message, true);
                     else setStatus('写真を削除しました。');
@@ -1850,6 +2022,8 @@ svg.leaflet-image-layer.leaflet-interactive path {
                     return setStatus('正しい緯度と経度を入力してください。', true);
                 saveButton.disabled = true;
                 let path = null;
+                let createdSpotId = null;
+                let photoInserted = false;
                 try {
                     const { data: userData, error: userError } = await db.auth.getUser();
                     if (userError || !userData.user) throw new Error('ログインし直してください。');
@@ -1863,21 +2037,37 @@ svg.leaflet-image-layer.leaflet-interactive path {
                         date: dateValue ? dateValue.replaceAll('-', '/') : '',
                         caption: document.getElementById('spot-caption').value.trim()
                     };
+                    let spotId=spotChoice.value;
+                    if(spotId==='new'){
+                        const {data:newSpot,error:spotError}=await db.from('spots')
+                            .insert({title,lat,lon}).select('id').single();
+                        if(spotError)throw spotError;
+                        spotId=newSpot.id;
+                        createdSpotId=spotId;
+                    }
+                    const {data:lastPhoto,error:orderError} = await db.from('photos')
+                        .select('sort_order').eq('spot_id',spotId)
+                        .order('sort_order',{ascending:false}).limit(1);
+                    if(orderError) throw orderError;
+                    const nextOrder = lastPhoto?.length ? Number(lastPhoto[0].sort_order)+1 : 0;
                     const { data, error: insertError } = await db.from('photos')
-                        .insert({ title, lat, lon, image_path: path, info, published: true }).select('id').single();
+                        .insert({ spot_id:spotId,title,lat,lon,image_path:path,info,published:true,sort_order:nextOrder }).select('id').single();
                     if (insertError) throw insertError;
+                    photoInserted = true;
                     const publicUrl = db.storage.from('photos').getPublicUrl(path).data.publicUrl;
                     await loadCloudPhotos();
                     await refreshManagedPhotos();
-                    setStatus('公開しました！通常のMAPを再読み込みしても表示されます。');
+                    await refreshSpotChoices(spotId);
+                    setStatus('写真をスポットに追加しました！公開MAPにも反映されています。');
                     selectedFile = null; fileInput.value = '';
-                    document.getElementById('spot-title').value = '';
+                    // The chosen spot remains selected for the next photo.
                     document.getElementById('spot-date').value = '';
                     document.getElementById('spot-caption').value = '';
                     document.getElementById('admin-preview').style.display = 'none';
                 } catch (err) {
                     // A failed database insert may leave a Storage object; attempt cleanup.
-                    if (path) await db.storage.from('photos').remove([path]).catch(() => {});
+                    if (!photoInserted && path) await db.storage.from('photos').remove([path]).catch(() => {});
+                    if (!photoInserted && createdSpotId) await db.from('spots').delete().eq('id',createdSpotId);
                     setStatus('保存失敗: ' + (err.message || String(err)), true);
                 } finally { saveButton.disabled = false; }
             };
