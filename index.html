@@ -1280,8 +1280,19 @@ svg.leaflet-image-layer.leaflet-interactive path {
     <script>
         const SUPABASE_URL = 'https://vmcenrxhiaqnvwsrhpva.supabase.co';
         const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_gEcGppOg_RJS0uaqCU1tqA_DTdrkU2p';
-        const supabaseReady = SUPABASE_URL.startsWith('https://') && !SUPABASE_PUBLISHABLE_KEY.startsWith('PASTE_');
-        const db = supabaseReady ? window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY) : null;
+
+const supabaseReady = SUPABASE_URL.startsWith('https://') && !SUPABASE_PUBLISHABLE_KEY.startsWith('PASTE_');
+const db = supabaseReady ? window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY) : null;
+
+// GA4 イベント計測
+function trackEvent(eventName, params = {}) {
+    if (typeof window.gtag === 'function') {
+        window.gtag('event', eventName, params);
+        console.log('[GA4]', eventName, params);
+    }
+}
+
+</script>
     </script>
     <button id="admin-open" type="button" hidden>写真を追加</button>
     <aside id="admin-panel" aria-label="写真管理">
