@@ -1487,15 +1487,37 @@ function trackEvent(eventName, params = {}) {
                 google.className = 'detail-location'; google.textContent = '↗ Googleマップで開く';
                 google.href = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${lat},${lon}`)}`;
                 google.target = '_blank'; google.rel = 'noopener noreferrer';
+
+
+                google.addEventListener('click', () => {
+                    trackEvent('google_maps_click', {
+                        spot_id: String(detailSpot?.id ?? ''),
+                        spot_name: detailSpot?.name || ''
+                    });
+                });
+
                 actions.append(go,google); detailInfo.append(actions);
             }
         }
         function changeDetailSlide(delta) {
+
+            console.log('写真切り替え関数が動いた！', delta);
             if (!detailSpot) return;
-            const length = (detailSpot.photos || [detailSpot]).length;
+
+            const items = detailSpot.photos || [detailSpot];
+            const length = items.length;
             detailSlideIndex = (detailSlideIndex + delta + length) % length;
             showDetailSlide();
+
+            trackEvent('photo_swipe', {
+                spot_id: String(detailSpot.id ?? ''),
+                spot_name: detailSpot.name || '',
+                direction: delta > 0 ? 'next' : 'prev',
+                photo_index: detailSlideIndex + 1,
+                photo_count: length
+            });
         }
+
         photoPrev.onclick = () => changeDetailSlide(-1);
         photoNext.onclick = () => changeDetailSlide(1);
         let slideTouchX = null, slideTouchY = null;
@@ -1510,16 +1532,24 @@ function trackEvent(eventName, params = {}) {
             if (Math.abs(dx)>45 && Math.abs(dx)>Math.abs(dy)*1.3) changeDetailSlide(dx<0?1:-1);
             slideTouchX = slideTouchY = null;
         },{passive:true});
-        function openDetail(spot) {
-            detailReturnFocus = document.activeElement;
-            detailSpot = spot;
-            detailSlideIndex = 0;
-            showDetailSlide();
-            detailOverlay.classList.add('open');
-            detailOverlay.setAttribute('aria-hidden','false');
-            document.body.style.overflow='hidden';
-            detailClose.focus();
-        }
+        
+    function openDetail(spot) {
+        detailReturnFocus = document.activeElement;
+        detailSpot = spot;
+        detailSlideIndex = 0;
+        showDetailSlide();
+        detailOverlay.classList.add('open');
+        detailOverlay.setAttribute('aria-hidden','false');
+        document.body.style.overflow='hidden';
+        detailClose.focus();
+
+        // GA4：スポット詳細を開いた回数
+        trackEvent('spot_view', {
+            spot_id: String(spot.id ?? ''),
+            spot_name: spot.name || ''
+        });
+    }
+
 
         function closeDetail(restoreFocus = true) {
             detailOverlay.classList.remove('open');
